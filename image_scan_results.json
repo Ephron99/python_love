@@ -1,0 +1,21 @@
+{
+  "scanned_at": "2025-10-07T14:56:49.442705",
+  "folder": "C:\\Users\\Public\\Documents\\Plustek-SecureScan\\Image",
+  "image_count": 1,
+  "images": [
+    {
+      "path": "C:\\Users\\Public\\Documents\\Plustek-SecureScan\\Image\\DEI.jpg - Copy.jpg",
+      "filename": "DEI.jpg - Copy.jpg",
+      "exists": true,
+      "size_bytes": 368861,
+      "created": "2025-10-07T14:48:54.943660",
+      "modified": "2024-06-12T15:18:14.378948",
+      "format": "JPEG",
+      "mode": "RGB",
+      "width": 1300,
+      "height": 813,
+      "exif": {},
+      "ocr_text": null
+    }
+  ]
+}
