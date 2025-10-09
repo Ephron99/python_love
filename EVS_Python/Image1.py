@@ -98,49 +98,76 @@ def detect_document_type(text):
 def extract_passport_names(text):
     """
     Extract names from passport.
-    Looks for surname and other names sections or MRZ format.
+    Prioritizes MRZ (last lines) as they are clearest.
     """
     lines = text.split('\n')
     surname = ""
     other_names = ""
     
-    # Method 1: Look for surname and other names labels
+    # METHOD 1 (PRIORITY): Look for MRZ lines (usually last 2 lines)
+    # MRZ is most reliable as it's designed to be machine-readable
+    # Check last 5 lines to be safe
+    for line in reversed(lines[-5:]):
+        line = line.strip()
+        
+        # Pattern 1: P<COUNTRY_CODE followed by name
+        # Example: P<USAGUPTA<<RAHUL<RAM or PCRWANIYONZIMA<<CLAUDINE
+        mrz_match = re.search(r'P[C<]?[A-Z]{3}([A-Z]+)<<([A-Z<]+)', line)
+        if mrz_match:
+            surname = mrz_match.group(1).replace('<', '').strip()
+            other_names = mrz_match.group(2).replace('<', ' ').strip()
+            return f"{surname} {other_names}".strip()
+        
+        # Pattern 2: Alternative MRZ format (starts with PC or P<)
+        if line.startswith('PC') or line.startswith('P<'):
+            # Extract everything after country code
+            name_part = re.search(r'P[C<]?[A-Z]{3}([A-Z<]+)', line)
+            if name_part:
+                names_raw = name_part.group(1)
+                # Split by << (surname separator from other names)
+                if '<<' in names_raw:
+                    parts = names_raw.split('<<')
+                    surname = parts[0].replace('<', '').strip()
+                    if len(parts) > 1:
+                        other_names = parts[1].replace('<', ' ').strip()
+                    return f"{surname} {other_names}".strip() if other_names else surname
+    
+    # METHOD 2 (FALLBACK): Look for surname and other names labels in full text
     for i, line in enumerate(lines):
         line_upper = line.upper()
         
         # Check for surname variations
-        if any(keyword in line_upper for keyword in ["SURNAME","NOM", "NOM/JINA", "IRINA"]):
-            # Next line might contain the surname
-            if i + 1 < len(lines):
-                words = lines[i + 1].split()
-                name_regex = r'\b([A-Z][A-Z]+)\b'
-                for word in words:
-                    matches = re.findall(name_regex, word)
-                    if matches:
-                        surname = matches[0]
+        if any(keyword in line_upper for keyword in ["SURNAME", "NOM", "IRINA"]) and not surname:
+            # Check next 2 lines for the actual name
+            for j in range(1, 3):
+                if i + j < len(lines):
+                    words = lines[i + j].split()
+                    name_regex = r'\b([A-Z]{2,})\b'  # At least 2 uppercase letters
+                    for word in words:
+                        matches = re.findall(name_regex, word)
+                        if matches and len(matches[0]) >= 3:  # Avoid short words like "DE"
+                            surname = matches[0]
+                            break
+                    if surname:
                         break
         
         # Check for other names/first names
-        if any(keyword in line_upper for keyword in ["OTHER NAMES", "PRÉNOMS", "ANDI MAZINA"]):
-            if i + 1 < len(lines):
-                words = lines[i + 1].split()
-                name_regex = r'\b([A-Z][A-Z]+)\b'
-                for word in words:
-                    matches = re.findall(name_regex, word)
-                    if matches:
-                        other_names = " ".join(matches)
+        if any(keyword in line_upper for keyword in ["OTHER NAMES", "PRÉNOMS", "PRÉNOM", "ANDI MAZINA", "GIVEN"]) and not other_names:
+            for j in range(1, 3):
+                if i + j < len(lines):
+                    words = lines[i + j].split()
+                    name_regex = r'\b([A-Z]{2,})\b'
+                    names_list = []
+                    for word in words:
+                        matches = re.findall(name_regex, word)
+                        for match in matches:
+                            if len(match) >= 3:
+                                names_list.append(match)
+                    if names_list:
+                        other_names = " ".join(names_list)
                         break
-    
-    # Method 2: Look for MRZ line (Machine Readable Zone)
-    # Format: P<USAGUPTA<<RAHUL<RAM or PCRWANIYONZIMA<<CLAUDINE
-    for line in lines:
-        if line.startswith('P<') or line.startswith('PC'):
-            # Extract from MRZ
-            mrz_match = re.search(r'P[C<]?[A-Z]{3}([A-Z]+)<<([A-Z<]+)', line)
-            if mrz_match:
-                surname = mrz_match.group(1).replace('<', '')
-                other_names = mrz_match.group(2).replace('<', ' ').strip()
-                break
+                    if other_names:
+                        break
     
     # Combine names
     if surname and other_names:
@@ -155,44 +182,59 @@ def extract_passport_names(text):
 def extract_passport_id(text):
     """
     Extract passport number from text.
-    Looks for passport number patterns or MRZ format.
+    Prioritizes MRZ lines (last lines) as they are clearest.
     """
     lines = text.split('\n')
     
-    # Method 1: Look for explicit passport number with PC prefix (Rwanda style)
-    pc_pattern = r'\b(PC\d{6})\b'
-    matches = re.findall(pc_pattern, text)
+    # METHOD 1 (PRIORITY): Extract from MRZ lines (last 5 lines)
+    for line in reversed(lines[-5:]):
+        line = line.strip()
+        
+        # Pattern 1: PC followed by 6 digits (Rwanda style)
+        match = re.search(r'\b(PC\d{6})\b', line)
+        if match:
+            return match.group(1)
+        
+        # Pattern 2: 9 consecutive digits at start of line (US/common format)
+        # MRZ second line format: passport_number<check_digit>country_code...
+        match = re.match(r'^(\d{9})', line)
+        if match:
+            return match.group(1)
+        
+        # Pattern 3: Look for any 8-9 digit number in MRZ line
+        match = re.search(r'\b(\d{8,9})\b', line)
+        if match:
+            return match.group(1)
+    
+    # METHOD 2 (FALLBACK): Search entire text
+    # Rwanda passport format
+    matches = re.findall(r'\b(PC\d{6})\b', text)
     if matches:
         return matches[0]
     
-    # Method 2: Look for MRZ line and extract passport number
-    # MRZ format for passports: second line contains passport number
-    for line in lines:
-        # US passport MRZ pattern: starts with passport number (9 digits)
-        mrz_match = re.match(r'^(\d{9})[A-Z]{3}', line)
-        if mrz_match:
-            return mrz_match.group(1)
-        
-        # Alternative: Look for number after PC in MRZ
-        if line.startswith('PC'):
-            num_match = re.search(r'PC(\d{6})', line)
-            if num_match:
-                return f"PC{num_match.group(1)}"
-    
-    # Method 3: Look for passport number label
+    # Look for passport number labels
     for i, line in enumerate(lines):
         line_upper = line.upper()
-        if any(keyword in line_upper for keyword in ["PASSPORT NO", "N° PASSEPORT", "NUMERO"]):
-            # Check current line and next line
-            for check_line in [line, lines[i + 1] if i + 1 < len(lines) else ""]:
-                # Look for PC followed by 6 digits
-                match = re.search(r'(PC\d{6})', check_line)
-                if match:
-                    return match.group(1)
-                # Look for 9 digit number
-                match = re.search(r'\b(\d{9})\b', check_line)
-                if match:
-                    return match.group(1)
+        if any(keyword in line_upper for keyword in ["PASSPORT NO", "N° PASSEPORT", "NUMERO", "NO."]):
+            # Check current line and next 2 lines
+            for j in range(0, 3):
+                if i + j < len(lines):
+                    check_line = lines[i + j]
+                    
+                    # PC format
+                    match = re.search(r'(PC\d{6})', check_line)
+                    if match:
+                        return match.group(1)
+                    
+                    # 9 digit format
+                    match = re.search(r'\b(\d{9})\b', check_line)
+                    if match:
+                        return match.group(1)
+                    
+                    # 8 digit format
+                    match = re.search(r'\b(\d{8})\b', check_line)
+                    if match:
+                        return match.group(1)
     
     return ""
 
